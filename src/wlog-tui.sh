@@ -76,7 +76,7 @@ render_calendar() {
 
     tput clear 2>/dev/null || printf '\033[2J\033[H'
 
-    local col_w=$(( (term_cols - 4) / 3 ))
+    local col_w=$(( (term_cols - 4) / 3 )) || true
     [[ $col_w -lt 20 ]] && col_w=20
 
     local col_labels=("Yesterday" "Today" "Tomorrow")
@@ -101,7 +101,7 @@ render_calendar() {
     # Entry rows
     local max_rows=$(( term_lines - 5 ))
     [[ $max_rows -lt 1 ]] && max_rows=1
-    local text_w=$(( col_w - 3 ))   # usable text width (cursor=2, space=1)
+    local text_w=$(( col_w - 3 )) || true  # usable text width (cursor=2, space=1)
     [[ $text_w -lt 5 ]] && text_w=5
 
     for c in 0 1 2; do
@@ -217,9 +217,9 @@ _tui_clamp_cursor() {
     local ref="_TUI_ENTRIES_${_TUI_FOCUSED_COL}[@]"
     local entries=("${!ref}")
     local nentries=${#entries[@]}
-    [[ $nentries -eq 0 ]] && _TUI_CURSOR_ROW=0 && return
+    if [[ $nentries -eq 0 ]]; then _TUI_CURSOR_ROW=0; return; fi
     [[ $_TUI_CURSOR_ROW -lt 0 ]] && _TUI_CURSOR_ROW=0
-    [[ $_TUI_CURSOR_ROW -ge $nentries ]] && _TUI_CURSOR_ROW=$(( nentries - 1 ))
+    [[ $_TUI_CURSOR_ROW -ge $nentries ]] && _TUI_CURSOR_ROW=$(( nentries - 1 )) || true
 }
 
 # ---------------------------------------------------------------------------
@@ -288,23 +288,23 @@ tui_calendar() {
 
         case "$key" in
             UP)
-                _TUI_CURSOR_ROW=$(( _TUI_CURSOR_ROW - 1 ))
+                _TUI_CURSOR_ROW=$(( _TUI_CURSOR_ROW - 1 )) || true
                 _tui_clamp_cursor
                 ;;
 
             DOWN)
-                _TUI_CURSOR_ROW=$(( _TUI_CURSOR_ROW + 1 ))
+                _TUI_CURSOR_ROW=$(( _TUI_CURSOR_ROW + 1 )) || true
                 _tui_clamp_cursor
                 ;;
 
             LEFT)
-                _TUI_FOCUSED_COL=$(( (_TUI_FOCUSED_COL - 1 + 3) % 3 ))
+                _TUI_FOCUSED_COL=$(( (_TUI_FOCUSED_COL - 1 + 3) % 3 )) || true
                 _tui_clamp_cursor
                 pending_d=0
                 ;;
 
             RIGHT|TAB)
-                _TUI_FOCUSED_COL=$(( (_TUI_FOCUSED_COL + 1) % 3 ))
+                _TUI_FOCUSED_COL=$(( (_TUI_FOCUSED_COL + 1) % 3 )) || true
                 _tui_clamp_cursor
                 pending_d=0
                 ;;
@@ -314,10 +314,10 @@ tui_calendar() {
                 local ref="_TUI_ENTRIES_${_TUI_FOCUSED_COL}[@]"
                 local entries=("${!ref}")
                 local nentries=${#entries[@]}
-                if (( nentries > 0 )) && (( _TUI_CURSOR_ROW < nentries )); then
+                if [[ $nentries -gt 0 && $_TUI_CURSOR_ROW -lt $nentries ]]; then
                     local entry="${entries[$_TUI_CURSOR_ROW]}"
                     local date_log="${_TUI_COL_DATES[$_TUI_FOCUSED_COL]}"
-                    toggle_entry "$date_log" "$entry"
+                    toggle_entry "$date_log" "$entry" || true
                     _tui_load_entries "$_TUI_FOCUSED_COL"
                 fi
                 ;;
@@ -328,7 +328,7 @@ tui_calendar() {
 
             n)
                 pending_d=0
-                _tui_inline_add
+                _tui_inline_add || true
                 _tui_load_entries "$_TUI_FOCUSED_COL"
                 _tui_clamp_cursor
                 ;;
@@ -339,10 +339,10 @@ tui_calendar() {
                     local ref="_TUI_ENTRIES_${_TUI_FOCUSED_COL}[@]"
                     local entries=("${!ref}")
                     local nentries=${#entries[@]}
-                    if (( nentries > 0 )) && (( _TUI_CURSOR_ROW < nentries )); then
+                    if [[ $nentries -gt 0 && $_TUI_CURSOR_ROW -lt $nentries ]]; then
                         local entry="${entries[$_TUI_CURSOR_ROW]}"
                         local date_log="${_TUI_COL_DATES[$_TUI_FOCUSED_COL]}"
-                        remove_entry "$date_log" "$entry"
+                        remove_entry "$date_log" "$entry" || true
                         _tui_load_entries "$_TUI_FOCUSED_COL"
                         _tui_clamp_cursor
                     fi
