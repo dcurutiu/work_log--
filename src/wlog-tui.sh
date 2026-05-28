@@ -107,32 +107,32 @@ render_calendar() {
         local row
         for (( row=0; row<max_rows; row++ )); do
             tput cup $(( row + 2 )) $col_x 2>/dev/null
+            # Clear the cell first (plain spaces, no escapes)
+            printf "%-${col_w}s" ""
+            tput cup $(( row + 2 )) $col_x 2>/dev/null
             if (( row < nentries )); then
                 local entry="${entries[$row]}"
-                local cursor_marker="  "
                 local entry_color="$COLOR_UNCHECKED"
                 if [[ "$entry" == "- [x]"* ]]; then
                     entry_color="$COLOR_CHECKED"
                 fi
+                # Max text width: col_w minus 2 (cursor) minus 1 (space) = col_w-3
+                local max_text=$(( col_w - 3 ))
+                local text="${entry:0:$max_text}"
                 if [[ $c -eq $_TUI_FOCUSED_COL && $row -eq $_TUI_CURSOR_ROW ]]; then
-                    cursor_marker="${COLOR_HIGHLIGHT}►${COLOR_RESET}"
+                    printf "%b►%b %b%-${max_text}s%b" \
+                        "$COLOR_HIGHLIGHT" "$COLOR_RESET" \
+                        "$entry_color" "$text" "$COLOR_RESET"
+                else
+                    printf "  %b%-${max_text}s%b" \
+                        "$entry_color" "$text" "$COLOR_RESET"
                 fi
-                # Truncate display to column width
-                local display="${entry:4}"  # strip "- [ ] " prefix to just text+marker
-                local full_display="${cursor_marker} ${entry_color}${entry}${COLOR_RESET}"
-                printf "%-${col_w}s" ""  # clear the cell first
-                tput cup $(( row + 2 )) $col_x 2>/dev/null
-                printf "%s %b%-$(( col_w - 3 ))s%b" \
-                    "$cursor_marker" "$entry_color" \
-                    "${entry:0:$(( col_w - 3 ))}" "$COLOR_RESET"
             else
                 # Empty cell
                 if [[ $c -eq $_TUI_FOCUSED_COL && $row -eq $_TUI_CURSOR_ROW && nentries -eq 0 ]]; then
-                    printf "%s %b%-$(( col_w - 3 ))s%b" \
-                        "${COLOR_HIGHLIGHT}►${COLOR_RESET}" \
+                    printf "%b►%b %b%-$(( col_w - 3 ))s%b" \
+                        "$COLOR_HIGHLIGHT" "$COLOR_RESET" \
                         "$COLOR_BORDER" "(no entries)" "$COLOR_RESET"
-                else
-                    printf "%-${col_w}s" ""
                 fi
             fi
         done
