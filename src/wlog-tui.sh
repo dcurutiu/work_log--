@@ -32,7 +32,8 @@ read_key() {
     if [[ "$ch" == $'\x1b' ]]; then
         # Generous timeout (0.3s) to handle slow terminals (VS Code, SSH, etc.)
         IFS= read -rsn1 -t 0.3 esc 2>/dev/null || esc=""
-        if [[ "$esc" == "[" ]]; then
+        # Handle both CSI (\x1b[) and SS3 (\x1bO) arrow key encodings
+        if [[ "$esc" == "[" || "$esc" == "O" ]]; then
             IFS= read -rsn1 -t 0.3 seq 2>/dev/null || seq=""
             case "$seq" in
                 A) echo "UP"    ; return ;;
@@ -41,6 +42,9 @@ read_key() {
                 D) echo "LEFT"  ; return ;;
             esac
         fi
+        # Unknown escape sequence — drain any leftover bytes so they don't
+        # get mis-read as the next keypress, then treat as ESC
+        while IFS= read -rsn1 -t 0.05 _drain 2>/dev/null; do :; done
         echo "ESC"
         return
     fi
