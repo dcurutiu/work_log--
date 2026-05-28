@@ -392,7 +392,9 @@ cmd_undo() {
 # ---------------------------------------------------------------------------
 md_to_html() {
     mkdir -p "$(dirname "$WLOG_HTML")"
-    awk '
+    local today_sortable
+    today_sortable=$(date +%Y%m%d)
+    awk -v today="$today_sortable" '
     BEGIN {
         print "<!DOCTYPE html><html><head><meta charset=\"utf-8\">"
         print "<title>WorkLog++</title>"
@@ -407,9 +409,19 @@ md_to_html() {
         print "  hr{border:none;border-top:1px solid #ddd;margin:1.5rem 0;}"
         print "</style></head><body>"
         in_list = 0
+        skip_day = 0
     }
-    /^## /  { close_list(); printf "<h2>%s</h2>\n", substr($0,4); next }
-    /^### / { close_list(); printf "<h3>%s</h3>\n", substr($0,5); next }
+    /^## /  { close_list(); skip_day=0; printf "<h2>%s</h2>\n", substr($0,4); next }
+    /^### / {
+        close_list()
+        day_str = substr($0, 5)  # "DD.MM.YYYY"
+        sortable = substr(day_str,7,4) substr(day_str,4,2) substr(day_str,1,2)
+        if (sortable > today) { skip_day=1; next }
+        skip_day=0
+        printf "<h3>%s</h3>\n", day_str
+        next
+    }
+    skip_day { next }
     /^-+$/ { close_list(); print "<hr>"; next }
     /^- \[x\]/ || /^- \[X\]/ {
         open_list()
@@ -428,7 +440,7 @@ md_to_html() {
     /^$/ { close_list(); next }
     function open_list()  { if (!in_list) { print "<ul>"; in_list=1 } }
     function close_list() { if (in_list)  { print "</ul>"; in_list=0 } }
-    END { close_list(); print "</body></html>" }
+    END { close_list(); print "<script>window.scrollTo(0,document.body.scrollHeight)</script>"; print "</body></html>" }
     ' "$WLOG_FILE" > "$WLOG_HTML"
 }
 
