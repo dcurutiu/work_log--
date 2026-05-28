@@ -437,7 +437,7 @@ md_to_html() {
 # ---------------------------------------------------------------------------
 open_browser() {
     local file="$1"
-    if uname -r 2>/dev/null | grep -qi microsoft; then
+    if uname -r 2>/dev/null | grep -qiE 'microsoft|WSL'; then
         local win_path
         win_path=$(wslpath -w "$file" 2>/dev/null) || win_path="$file"
         powershell.exe -Command "Start-Process '$win_path'" &>/dev/null || true
