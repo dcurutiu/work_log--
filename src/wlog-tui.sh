@@ -97,6 +97,8 @@ render_calendar() {
     # Entry rows
     local max_rows=$(( term_lines - 5 ))
     [[ $max_rows -lt 1 ]] && max_rows=1
+    local text_w=$(( col_w - 3 ))   # usable text width (cursor=2, space=1)
+    [[ $text_w -lt 5 ]] && text_w=5
 
     for c in 0 1 2; do
         local col_x=$(( c * (col_w + 2) ))
@@ -104,35 +106,68 @@ render_calendar() {
         local entries=("${!entries_ref}")
         local nentries=${#entries[@]}
 
+        # Build word-wrapped display lines for this column.
+        # Each element: "entry_idx|is_first|text"
+        local display_lines=()
+        local ei
+        for (( ei=0; ei<nentries; ei++ )); do
+            local remaining="${entries[$ei]}"
+            local is_first=1
+            while [[ ${#remaining} -gt $text_w ]]; do
+                local chunk="${remaining:0:$text_w}"
+                local bp=$text_w
+                # Try to break at last space within the width
+                local i
+                for (( i=text_w-1; i>0; i-- )); do
+                    if [[ "${chunk:$i:1}" == " " ]]; then
+                        bp=$i; break
+                    fi
+                done
+                if [[ $bp -eq $text_w ]]; then
+                    display_lines+=("${ei}|${is_first}|${remaining:0:$text_w}")
+                    remaining="${remaining:$text_w}"
+                else
+                    display_lines+=("${ei}|${is_first}|${remaining:0:$bp}")
+                    remaining="${remaining:$(( bp + 1 ))}"
+                fi
+                is_first=0
+            done
+            display_lines+=("${ei}|${is_first}|${remaining}")
+        done
+
+        local total_display=${#display_lines[@]}
         local row
         for (( row=0; row<max_rows; row++ )); do
             tput cup $(( row + 2 )) $col_x 2>/dev/null
-            # Clear the cell first (plain spaces, no escapes)
-            printf "%-${col_w}s" ""
+            printf "%-${col_w}s" ""          # clear cell
             tput cup $(( row + 2 )) $col_x 2>/dev/null
-            if (( row < nentries )); then
-                local entry="${entries[$row]}"
+            if (( row < total_display )); then
+                local dline="${display_lines[$row]}"
+                local d_ei="${dline%%|*}"; local rest="${dline#*|}"
+                local d_first="${rest%%|*}"; local d_text="${rest#*|}"
                 local entry_color="$COLOR_UNCHECKED"
-                if [[ "$entry" == "- [x]"* ]]; then
+                if [[ "${entries[$d_ei]}" == "- [x]"* ]]; then
                     entry_color="$COLOR_CHECKED"
                 fi
-                # Max text width: col_w minus 2 (cursor) minus 1 (space) = col_w-3
-                local max_text=$(( col_w - 3 ))
-                local text="${entry:0:$max_text}"
-                if [[ $c -eq $_TUI_FOCUSED_COL && $row -eq $_TUI_CURSOR_ROW ]]; then
-                    printf "%b►%b %b%-${max_text}s%b" \
+                if [[ $c -eq $_TUI_FOCUSED_COL && $d_ei -eq $_TUI_CURSOR_ROW && $d_first -eq 1 ]]; then
+                    # First line of selected entry — show cursor
+                    printf "%b►%b %b%-${text_w}s%b" \
                         "$COLOR_HIGHLIGHT" "$COLOR_RESET" \
-                        "$entry_color" "$text" "$COLOR_RESET"
+                        "$entry_color" "$d_text" "$COLOR_RESET"
+                elif [[ $c -eq $_TUI_FOCUSED_COL && $d_ei -eq $_TUI_CURSOR_ROW ]]; then
+                    # Continuation line of selected entry — indent to match cursor width
+                    printf "   %b%-$(( text_w - 1 ))s%b" "$entry_color" "$d_text" "$COLOR_RESET"
                 else
-                    printf "  %b%-${max_text}s%b" \
-                        "$entry_color" "$text" "$COLOR_RESET"
+                    printf "  %b%-${text_w}s%b" "$entry_color" "$d_text" "$COLOR_RESET"
                 fi
-            else
-                # Empty cell
-                if [[ $c -eq $_TUI_FOCUSED_COL && $row -eq $_TUI_CURSOR_ROW && nentries -eq 0 ]]; then
-                    printf "%b►%b %b%-$(( col_w - 3 ))s%b" \
+            elif (( row == 0 && nentries == 0 )); then
+                # Empty column
+                if [[ $c -eq $_TUI_FOCUSED_COL ]]; then
+                    printf "%b►%b %b%-${text_w}s%b" \
                         "$COLOR_HIGHLIGHT" "$COLOR_RESET" \
                         "$COLOR_BORDER" "(no entries)" "$COLOR_RESET"
+                else
+                    printf "  %b%-${text_w}s%b" "$COLOR_BORDER" "(no entries)" "$COLOR_RESET"
                 fi
             fi
         done
