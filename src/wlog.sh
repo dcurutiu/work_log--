@@ -335,7 +335,7 @@ print_day() {
         printf "  %b(no entries)%b\n" "$COLOR_BORDER" "$COLOR_RESET"
     else
         while IFS= read -r line; do
-            if [[ "$line" == "- [x]"* ]]; then
+            if [[ "$line" == "- [x]"* || "$line" == "- [X]"* ]]; then
                 printf "  %b%s%b\n" "$COLOR_CHECKED" "$line" "$COLOR_RESET"
             else
                 printf "  %b%s%b\n" "$COLOR_UNCHECKED" "$line" "$COLOR_RESET"

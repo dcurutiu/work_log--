@@ -150,7 +150,7 @@ render_calendar() {
                 local d_ei="${dline%%|*}"; local rest="${dline#*|}"
                 local d_first="${rest%%|*}"; local d_text="${rest#*|}"
                 local entry_color="$COLOR_UNCHECKED"
-                if [[ "${entries[$d_ei]}" == "- [x]"* ]]; then
+                if [[ "${entries[$d_ei]}" == "- [x]"* || "${entries[$d_ei]}" == "- [X]"* ]]; then
                     entry_color="$COLOR_CHECKED"
                 fi
                 if [[ $c -eq $_TUI_FOCUSED_COL && $d_ei -eq $_TUI_CURSOR_ROW && $d_first -eq 1 ]]; then
