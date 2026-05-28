@@ -35,10 +35,15 @@ COLOR_BORDER=""
 # ---------------------------------------------------------------------------
 load_config() {
     local config_file="${HOME}/.config/wlog/config.sh"
+    # Save env-supplied values before sourcing config (env must win over config)
+    local _env_wlog_file="${WLOG_FILE:-}"
+    local _env_wlog_theme="${WLOG_THEME:-}"
+    local _env_wlog_editor="${WLOG_EDITOR:-}"
     [[ -f "$config_file" ]] && source "$config_file"
     # Apply env overrides after sourcing (env takes precedence over config file)
-    WLOG_FILE="${WLOG_FILE:-${HOME}/.local/share/wlog/worklog.md}"
-    WLOG_THEME="${WLOG_THEME:-${HOME}/.config/wlog/theme.sh}"
+    WLOG_FILE="${_env_wlog_file:-${WLOG_FILE:-${HOME}/.local/share/wlog/worklog.md}}"
+    WLOG_THEME="${_env_wlog_theme:-${WLOG_THEME:-${HOME}/.config/wlog/theme.sh}}"
+    [[ -n "$_env_wlog_editor" ]] && WLOG_EDITOR="$_env_wlog_editor"
     # First-run bootstrap (T039): create log file if missing
     if [[ ! -f "$WLOG_FILE" ]]; then
         mkdir -p "$(dirname "$WLOG_FILE")"
@@ -474,6 +479,55 @@ validate_n() {
 }
 
 # ---------------------------------------------------------------------------
+# Editor resolver (FR-001..FR-003)
+# ---------------------------------------------------------------------------
+resolve_editor() {
+    # Returns the editor command line via stdout; exits non-zero on failure.
+    local editor_cmd=""
+
+    # 1) WLOG_EDITOR env var / config-file value (set by load_config)
+    if [[ -n "${WLOG_EDITOR:-}" ]]; then
+        local first_token
+        first_token=$(echo "$WLOG_EDITOR" | awk '{print $1}')
+        if command -v "$first_token" &>/dev/null; then
+            echo "$WLOG_EDITOR"
+            return 0
+        else
+            printf "wlog: configured editor '%s' not found on PATH. Update WLOG_EDITOR.\n" "$first_token" >&2
+            return 2
+        fi
+    fi
+
+    # 2) Auto-detect: code
+    if command -v code &>/dev/null; then
+        echo "code"
+        return 0
+    fi
+
+    # 3) Auto-detect: nano
+    if command -v nano &>/dev/null; then
+        echo "nano"
+        return 0
+    fi
+
+    printf "wlog: no editor available. Set WLOG_EDITOR (env var or in ~/.config/wlog/config.sh), or install 'code' or 'nano'.\n" >&2
+    return 2
+}
+
+# ---------------------------------------------------------------------------
+# CMD: open log in editor (FR-001, FR-004, FR-005, FR-006)
+# ---------------------------------------------------------------------------
+cmd_edit() {
+    local editor_cmd
+    editor_cmd=$(resolve_editor) || exit $?
+    # word-split $editor_cmd so flags like "code -w" are passed correctly;
+    # WLOG_FILE is quoted to handle paths with spaces
+    # exec replaces this process so the editor's exit code becomes wlog's exit code
+    # shellcheck disable=SC2086
+    exec $editor_cmd "$WLOG_FILE"
+}
+
+# ---------------------------------------------------------------------------
 # Help text (T017)
 # ---------------------------------------------------------------------------
 cmd_help() {
@@ -490,15 +544,17 @@ Usage: wlog [COMMAND] [OPTIONS]
   wlog + -p/-f N    Add an activity for N days ago/ahead
   wlog -c           Open calendar TUI view
   wlog -a           Open full log as HTML in browser
+  wlog -m           Open the worklog file in your editor
   wlog --undo       Remove last added entry
   wlog -h           Show this help
 
 Config:
   WLOG_FILE         Override log file path (default: ~/.local/share/wlog/worklog.md)
   WLOG_THEME        Override theme file path (default: ~/.config/wlog/theme.sh)
+  WLOG_EDITOR       Editor command (default: code if present, else nano)
   NO_COLOR          Set to any value to disable color output
   ~/.config/wlog/theme.sh    Color theme overrides (sourced shell variables)
-  ~/.config/wlog/config.sh   Config overrides (WLOG_FILE=, WLOG_THEME=)
+  ~/.config/wlog/config.sh   Config overrides (WLOG_FILE=, WLOG_THEME=, WLOG_EDITOR=)
 EOF
 }
 
@@ -606,6 +662,10 @@ main() {
             md_to_html
             printf "Generated: %s\n" "$WLOG_HTML"
             open_browser "$WLOG_HTML"
+            ;;
+
+        "-m")
+            cmd_edit
             ;;
 
         "--undo")
