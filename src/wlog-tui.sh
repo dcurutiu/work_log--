@@ -27,14 +27,18 @@ tui_exit() {
 # T030 — read a single keypress; return a named token
 # ---------------------------------------------------------------------------
 read_key() {
+    # Use -N1 (uppercase) instead of -n1: -n1 honors the default delimiter
+    # (newline), so when the user presses Enter, bash consumes the \n and
+    # leaves the variable EMPTY — making Enter silently undetectable.
+    # -N1 reads exactly 1 byte ignoring any delimiter.
     local ch esc seq
-    IFS= read -rsn1 ch
+    IFS= read -rsN1 ch
     if [[ "$ch" == $'\x1b' ]]; then
         # Generous timeout (0.3s) to handle slow terminals (VS Code, SSH, etc.)
-        IFS= read -rsn1 -t 0.3 esc 2>/dev/null || esc=""
+        IFS= read -rsN1 -t 0.3 esc 2>/dev/null || esc=""
         # Handle both CSI (\x1b[) and SS3 (\x1bO) arrow key encodings
         if [[ "$esc" == "[" || "$esc" == "O" ]]; then
-            IFS= read -rsn1 -t 0.3 seq 2>/dev/null || seq=""
+            IFS= read -rsN1 -t 0.3 seq 2>/dev/null || seq=""
             case "$seq" in
                 A) echo "UP"    ; return ;;
                 B) echo "DOWN"  ; return ;;
@@ -44,7 +48,7 @@ read_key() {
         fi
         # Unknown escape sequence — drain any leftover bytes so they don't
         # get mis-read as the next keypress, then treat as ESC
-        while IFS= read -rsn1 -t 0.05 _drain 2>/dev/null; do :; done
+        while IFS= read -rsN1 -t 0.05 _drain 2>/dev/null; do :; done
         echo "ESC"
         return
     fi
