@@ -1,11 +1,354 @@
 #!/usr/bin/env bash
 # WorkLog++ TUI Calendar View
 # Sourced by wlog.sh when `wlog -c` is invoked.
-set -euo pipefail
+# Requires: tput, stty, read  (all standard)
+# Functions in this file call toggle_entry / remove_entry / append_entry
+# which are defined in wlog.sh (already sourced before this file).
 
-# Stub — implemented in Phase 7 (T029–T034)
+# ---------------------------------------------------------------------------
+# T029 — terminal enter/exit
+# ---------------------------------------------------------------------------
+_TUI_STTY_SAVE=""
+
+tui_enter() {
+    _TUI_STTY_SAVE=$(stty -g)
+    tput smcup 2>/dev/null || true
+    tput civis 2>/dev/null || true
+    stty raw -echo 2>/dev/null || true
+}
+
+tui_exit() {
+    stty "$_TUI_STTY_SAVE" 2>/dev/null || true
+    tput cnorm 2>/dev/null || true
+    tput rmcup 2>/dev/null || true
+}
+
+# ---------------------------------------------------------------------------
+# T030 — read a single keypress; return a named token
+# ---------------------------------------------------------------------------
+read_key() {
+    local ch esc seq
+    IFS= read -rsn1 ch
+    if [[ "$ch" == $'\x1b' ]]; then
+        # Try to read escape sequence (timeout 0.1s each byte)
+        IFS= read -rsn1 -t 0.1 esc 2>/dev/null || esc=""
+        if [[ "$esc" == "[" ]]; then
+            IFS= read -rsn1 -t 0.1 seq 2>/dev/null || seq=""
+            case "$seq" in
+                A) echo "UP"    ; return ;;
+                B) echo "DOWN"  ; return ;;
+                C) echo "RIGHT" ; return ;;
+                D) echo "LEFT"  ; return ;;
+            esac
+        fi
+        echo "ESC"
+        return
+    fi
+    case "$ch" in
+        $'\n'|$'\r') echo "ENTER"  ;;
+        $'\t')        echo "TAB"    ;;
+        d)            echo "d"      ;;
+        n)            echo "n"      ;;
+        '[')          echo "["      ;;
+        ']')          echo "]"      ;;
+        q|Q)          echo "q"      ;;
+        *)            echo "$ch"    ;;
+    esac
+}
+
+# ---------------------------------------------------------------------------
+# T031 — render the three-column calendar
+# ---------------------------------------------------------------------------
+# Globals set by tui_calendar before calling this:
+#   _TUI_COL_DATES   — array of 3 DD.MM.YYYY dates  (left / center / right)
+#   _TUI_FOCUSED_COL — 0..2
+#   _TUI_CURSOR_ROW  — 0-based index within focused column's entry list
+#   _TUI_ENTRIES_*   — arrays set per column
+#   COLS / LINES     — terminal dimensions
+render_calendar() {
+    local term_cols term_lines
+    term_cols=$(tput cols  2>/dev/null || echo 80)
+    term_lines=$(tput lines 2>/dev/null || echo 24)
+
+    tput clear 2>/dev/null || printf '\033[2J\033[H'
+
+    local col_w=$(( (term_cols - 4) / 3 ))
+    [[ $col_w -lt 20 ]] && col_w=20
+
+    local col_labels=("Yesterday" "Today" "Tomorrow")
+    local col_colors=("$COLOR_YESTERDAY" "$COLOR_TODAY" "$COLOR_TOMORROW")
+
+    # Header row
+    tput cup 0 0 2>/dev/null
+    local c
+    for c in 0 1 2; do
+        local date_str="${_TUI_COL_DATES[$c]}"
+        local label="${col_labels[$c]}"
+        local color="${col_colors[$c]}"
+        local col_x=$(( c * (col_w + 2) ))
+        tput cup 0 $col_x 2>/dev/null
+        printf "%b%-${col_w}s%b" "$color" "${label}: ${date_str}" "$COLOR_RESET"
+    done
+
+    # Separator line
+    tput cup 1 0 2>/dev/null
+    printf "%b%s%b" "$COLOR_BORDER" "$(printf '%*s' "$term_cols" | tr ' ' '-')" "$COLOR_RESET"
+
+    # Entry rows
+    local max_rows=$(( term_lines - 5 ))
+    [[ $max_rows -lt 1 ]] && max_rows=1
+
+    for c in 0 1 2; do
+        local col_x=$(( c * (col_w + 2) ))
+        local entries_ref="_TUI_ENTRIES_${c}[@]"
+        local entries=("${!entries_ref}")
+        local nentries=${#entries[@]}
+
+        local row
+        for (( row=0; row<max_rows; row++ )); do
+            tput cup $(( row + 2 )) $col_x 2>/dev/null
+            if (( row < nentries )); then
+                local entry="${entries[$row]}"
+                local cursor_marker="  "
+                local entry_color="$COLOR_UNCHECKED"
+                if [[ "$entry" == "- [x]"* ]]; then
+                    entry_color="$COLOR_CHECKED"
+                fi
+                if [[ $c -eq $_TUI_FOCUSED_COL && $row -eq $_TUI_CURSOR_ROW ]]; then
+                    cursor_marker="${COLOR_HIGHLIGHT}►${COLOR_RESET}"
+                fi
+                # Truncate display to column width
+                local display="${entry:4}"  # strip "- [ ] " prefix to just text+marker
+                local full_display="${cursor_marker} ${entry_color}${entry}${COLOR_RESET}"
+                printf "%-${col_w}s" ""  # clear the cell first
+                tput cup $(( row + 2 )) $col_x 2>/dev/null
+                printf "%s %b%-$(( col_w - 3 ))s%b" \
+                    "$cursor_marker" "$entry_color" \
+                    "${entry:0:$(( col_w - 3 ))}" "$COLOR_RESET"
+            else
+                # Empty cell
+                if [[ $c -eq $_TUI_FOCUSED_COL && $row -eq $_TUI_CURSOR_ROW && nentries -eq 0 ]]; then
+                    printf "%s %b%-$(( col_w - 3 ))s%b" \
+                        "${COLOR_HIGHLIGHT}►${COLOR_RESET}" \
+                        "$COLOR_BORDER" "(no entries)" "$COLOR_RESET"
+                else
+                    printf "%-${col_w}s" ""
+                fi
+            fi
+        done
+    done
+
+    # Status bar at bottom
+    local status_row=$(( term_lines - 2 ))
+    tput cup $status_row 0 2>/dev/null
+    printf "%b%s%b" "$COLOR_BORDER" \
+        "$(printf '%*s' "$term_cols" | tr ' ' '-')" "$COLOR_RESET"
+    tput cup $(( status_row + 1 )) 0 2>/dev/null
+    printf "%b↑↓%b move  %bEnter%b toggle  %bd+y%b delete  %bn%b add  %b[/]%b shift day  %bTab%b switch col  %bq%b quit" \
+        "$COLOR_HIGHLIGHT" "$COLOR_RESET" \
+        "$COLOR_HIGHLIGHT" "$COLOR_RESET" \
+        "$COLOR_HIGHLIGHT" "$COLOR_RESET" \
+        "$COLOR_HIGHLIGHT" "$COLOR_RESET" \
+        "$COLOR_HIGHLIGHT" "$COLOR_RESET" \
+        "$COLOR_HIGHLIGHT" "$COLOR_RESET" \
+        "$COLOR_HIGHLIGHT" "$COLOR_RESET"
+}
+
+# ---------------------------------------------------------------------------
+# Helper: load entries for a column into _TUI_ENTRIES_N array
+# ---------------------------------------------------------------------------
+_tui_load_entries() {
+    local col="$1"
+    local date_log="${_TUI_COL_DATES[$col]}"
+    local raw
+    raw=$(parse_day_entries "$date_log" 2>/dev/null || true)
+    # Read into per-column array using nameref-style eval (bash 4 compat)
+    eval "_TUI_ENTRIES_${col}=()"
+    if [[ -n "$raw" ]]; then
+        while IFS= read -r line; do
+            eval "_TUI_ENTRIES_${col}+=(\"\$line\")"
+        done <<< "$raw"
+    fi
+}
+
+# ---------------------------------------------------------------------------
+# Helper: clamp cursor to valid range for current column
+# ---------------------------------------------------------------------------
+_tui_clamp_cursor() {
+    local ref="_TUI_ENTRIES_${_TUI_FOCUSED_COL}[@]"
+    local entries=("${!ref}")
+    local nentries=${#entries[@]}
+    [[ $nentries -eq 0 ]] && _TUI_CURSOR_ROW=0 && return
+    [[ $_TUI_CURSOR_ROW -lt 0 ]] && _TUI_CURSOR_ROW=0
+    [[ $_TUI_CURSOR_ROW -ge $nentries ]] && _TUI_CURSOR_ROW=$(( nentries - 1 ))
+}
+
+# ---------------------------------------------------------------------------
+# Helper: inline add prompt (used in TUI for 'n' key)
+# ---------------------------------------------------------------------------
+_tui_inline_add() {
+    local date_log="${_TUI_COL_DATES[$_TUI_FOCUSED_COL]}"
+    local term_lines
+    term_lines=$(tput lines 2>/dev/null || echo 24)
+    local prompt_row=$(( term_lines - 4 ))
+
+    # Restore echo temporarily for input
+    stty "$_TUI_STTY_SAVE" 2>/dev/null || true
+
+    tput cup $prompt_row 0 2>/dev/null
+    printf "%b  Add for %s (Enter=save, Ctrl+C=cancel): %b" \
+        "$COLOR_HIGHLIGHT" "$date_log" "$COLOR_RESET"
+    tput el 2>/dev/null || true
+
+    local text=""
+    IFS= read -e -r text 2>/dev/null || text=""
+
+    stty raw -echo 2>/dev/null || true
+
+    if [[ -n "$text" ]]; then
+        append_entry "$date_log" "$text"
+    fi
+}
+
+# ---------------------------------------------------------------------------
+# T032 — main TUI event loop
+# ---------------------------------------------------------------------------
 tui_calendar() {
-    local center_date="${1:-}"
-    echo "wlog: TUI calendar not yet implemented" >&2
-    exit 1
+    local center_date="${1:-$(date +%Y-%m-%d)}"
+
+    # Compute left / center / right dates (workday-aware)
+    local left_date right_date
+    left_date=$(resolve_workday "$center_date" -1)
+    right_date=$(resolve_workday "$center_date" +1)
+
+    _TUI_COL_DATES=( "$(iso_to_log "$left_date")" "$(iso_to_log "$center_date")" "$(iso_to_log "$right_date")" )
+    _TUI_FOCUSED_COL=1   # start on today (center)
+    _TUI_CURSOR_ROW=0
+
+    # Load all column entries
+    _TUI_ENTRIES_0=()
+    _TUI_ENTRIES_1=()
+    _TUI_ENTRIES_2=()
+    _tui_load_entries 0
+    _tui_load_entries 1
+    _tui_load_entries 2
+
+    tui_enter
+    trap 'tui_exit; exit 0' EXIT INT TERM
+
+    local pending_d=0  # tracks whether 'd' was pressed waiting for 'y' confirm
+
+    while true; do
+        render_calendar
+
+        local key
+        key=$(read_key)
+
+        case "$key" in
+            UP)
+                _TUI_CURSOR_ROW=$(( _TUI_CURSOR_ROW - 1 ))
+                _tui_clamp_cursor
+                ;;
+
+            DOWN)
+                _TUI_CURSOR_ROW=$(( _TUI_CURSOR_ROW + 1 ))
+                _tui_clamp_cursor
+                ;;
+
+            LEFT)
+                _TUI_FOCUSED_COL=$(( (_TUI_FOCUSED_COL - 1 + 3) % 3 ))
+                _tui_clamp_cursor
+                pending_d=0
+                ;;
+
+            RIGHT|TAB)
+                _TUI_FOCUSED_COL=$(( (_TUI_FOCUSED_COL + 1) % 3 ))
+                _tui_clamp_cursor
+                pending_d=0
+                ;;
+
+            ENTER)
+                pending_d=0
+                local ref="_TUI_ENTRIES_${_TUI_FOCUSED_COL}[@]"
+                local entries=("${!ref}")
+                local nentries=${#entries[@]}
+                if (( nentries > 0 )) && (( _TUI_CURSOR_ROW < nentries )); then
+                    local entry="${entries[$_TUI_CURSOR_ROW]}"
+                    local date_log="${_TUI_COL_DATES[$_TUI_FOCUSED_COL]}"
+                    toggle_entry "$date_log" "$entry"
+                    _tui_load_entries "$_TUI_FOCUSED_COL"
+                fi
+                ;;
+
+            d)
+                pending_d=1
+                ;;
+
+            n)
+                pending_d=0
+                _tui_inline_add
+                _tui_load_entries "$_TUI_FOCUSED_COL"
+                _tui_clamp_cursor
+                ;;
+
+            y)
+                if [[ $pending_d -eq 1 ]]; then
+                    pending_d=0
+                    local ref="_TUI_ENTRIES_${_TUI_FOCUSED_COL}[@]"
+                    local entries=("${!ref}")
+                    local nentries=${#entries[@]}
+                    if (( nentries > 0 )) && (( _TUI_CURSOR_ROW < nentries )); then
+                        local entry="${entries[$_TUI_CURSOR_ROW]}"
+                        local date_log="${_TUI_COL_DATES[$_TUI_FOCUSED_COL]}"
+                        remove_entry "$date_log" "$entry"
+                        _tui_load_entries "$_TUI_FOCUSED_COL"
+                        _tui_clamp_cursor
+                    fi
+                fi
+                ;;
+
+            '[')
+                pending_d=0
+                # Shift all dates one workday backward
+                local new_center_iso
+                new_center_iso=$(log_to_iso "${_TUI_COL_DATES[1]}")
+                new_center_iso=$(resolve_workday "$new_center_iso" -1)
+                local new_left_iso new_right_iso
+                new_left_iso=$(resolve_workday "$new_center_iso" -1)
+                new_right_iso=$(resolve_workday "$new_center_iso" +1)
+                _TUI_COL_DATES=( "$(iso_to_log "$new_left_iso")" "$(iso_to_log "$new_center_iso")" "$(iso_to_log "$new_right_iso")" )
+                _tui_load_entries 0
+                _tui_load_entries 1
+                _tui_load_entries 2
+                _tui_clamp_cursor
+                ;;
+
+            ']')
+                pending_d=0
+                # Shift all dates one workday forward
+                local new_center_iso
+                new_center_iso=$(log_to_iso "${_TUI_COL_DATES[1]}")
+                new_center_iso=$(resolve_workday "$new_center_iso" +1)
+                local new_left_iso new_right_iso
+                new_left_iso=$(resolve_workday "$new_center_iso" -1)
+                new_right_iso=$(resolve_workday "$new_center_iso" +1)
+                _TUI_COL_DATES=( "$(iso_to_log "$new_left_iso")" "$(iso_to_log "$new_center_iso")" "$(iso_to_log "$new_right_iso")" )
+                _tui_load_entries 0
+                _tui_load_entries 1
+                _tui_load_entries 2
+                _tui_clamp_cursor
+                ;;
+
+            q|Q|ESC)
+                break
+                ;;
+
+            *)
+                pending_d=0
+                ;;
+        esac
+    done
+
+    tui_exit
+    trap - EXIT INT TERM
 }
