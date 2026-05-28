@@ -204,7 +204,7 @@ ensure_day_section() {
                     {
                         if (in_month && /^## / && $0 != month) {
                             # Entering next month — insert our day before this line
-                            printf "\n### %s\n\n", day
+                            printf "\n%s\n\n", day
                             in_month=0
                         }
                         print
@@ -212,7 +212,7 @@ ensure_day_section() {
                     END {
                         if (in_month) {
                             # Month was last section — append at end
-                            printf "\n### %s\n\n", day
+                            printf "\n%s\n\n", day
                         }
                     }
                 ' "$WLOG_FILE" > "$tmpfile"
