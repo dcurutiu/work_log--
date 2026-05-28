@@ -30,10 +30,10 @@ read_key() {
     local ch esc seq
     IFS= read -rsn1 ch
     if [[ "$ch" == $'\x1b' ]]; then
-        # Try to read escape sequence (timeout 0.1s each byte)
-        IFS= read -rsn1 -t 0.1 esc 2>/dev/null || esc=""
+        # Generous timeout (0.3s) to handle slow terminals (VS Code, SSH, etc.)
+        IFS= read -rsn1 -t 0.3 esc 2>/dev/null || esc=""
         if [[ "$esc" == "[" ]]; then
-            IFS= read -rsn1 -t 0.1 seq 2>/dev/null || seq=""
+            IFS= read -rsn1 -t 0.3 seq 2>/dev/null || seq=""
             case "$seq" in
                 A) echo "UP"    ; return ;;
                 B) echo "DOWN"  ; return ;;
@@ -227,18 +227,21 @@ _tui_inline_add() {
     term_lines=$(tput lines 2>/dev/null || echo 24)
     local prompt_row=$(( term_lines - 4 ))
 
-    # Restore echo temporarily for input
+    # Restore normal terminal mode (echo on, cooked) and show cursor
     stty "$_TUI_STTY_SAVE" 2>/dev/null || true
+    tput cnorm 2>/dev/null || true
 
     tput cup $prompt_row 0 2>/dev/null
-    printf "%b  Add for %s (Enter=save, Ctrl+C=cancel): %b" \
-        "$COLOR_HIGHLIGHT" "$date_log" "$COLOR_RESET"
     tput el 2>/dev/null || true
+    printf "%b  Add for %s (Enter=save, Ctrl+C=cancel):%b " \
+        "$COLOR_HIGHLIGHT" "$date_log" "$COLOR_RESET"
 
     local text=""
-    IFS= read -e -r text 2>/dev/null || text=""
+    IFS= read -r text 2>/dev/null || text=""
 
+    # Re-enter raw mode and re-hide cursor
     stty raw -echo 2>/dev/null || true
+    tput civis 2>/dev/null || true
 
     if [[ -n "$text" ]]; then
         append_entry "$date_log" "$text"
