@@ -410,8 +410,8 @@ md_to_html() {
     }
     /^## /  { close_list(); printf "<h2>%s</h2>\n", substr($0,4); next }
     /^### / { close_list(); printf "<h3>%s</h3>\n", substr($0,5); next }
-    /^-{3,}/ { close_list(); print "<hr>"; next }
-    /^- \[x\]/ {
+    /^-+$/ { close_list(); print "<hr>"; next }
+    /^- \[x\]/ || /^- \[X\]/ {
         open_list()
         line = substr($0, 7)
         gsub(/&/, "\\&amp;", line); gsub(/</, "\\&lt;", line); gsub(/>/, "\\&gt;", line)
