@@ -176,47 +176,24 @@ ensure_day_section() {
                     printf "\n--------------------\n## %s\n\n### %s\n\n" "$month_h" "$date_log"
                 } > "$tmpfile"
             else
-                # Month exists, add day heading after last entry in that month
+                # Month exists: insert new day heading at end of that month's section.
+                # Key: check end-of-month signals BEFORE updating in_month tracking,
+                # so the previous in_month value is visible at decision time.
                 awk -v month="$month_marker" -v day="$day_marker" '
-                    { lines[NR] = $0 }
-                    END {
-                        inserted = 0
-                        for (i = 1; i <= NR; i++) {
-                            print lines[i]
-                            # Insert after month heading block, before next ## or EOF
-                            if (!inserted && lines[i] == month) {
-                                # scan forward to find insertion point
-                                # (after last ### in this month, before next ## or EOF)
-                                j = i + 1
-                                last_day_line = i
-                                while (j <= NR && lines[j] !~ /^## [^#]/) {
-                                    if (lines[j] ~ /^### /) last_day_line = j
-                                    j++
-                                }
-                                # We already printed up to i; need to print up to last_day_line
-                                # then insert. Restart with awk reprocess is complex;
-                                # use simpler approach: just append day at end of month block.
-                            }
-                        }
-                    }
-                ' "$WLOG_FILE" > /dev/null
-                # Simpler: find last ### line in the month, insert new day after its entries
-                awk -v month="$month_marker" -v day="$day_marker" '
-                    BEGIN { in_month=0; buf=""; needs_newline=0 }
-                    /^## / && $0 != month { in_month=0 }
-                    $0 == month           { in_month=1 }
-                    in_month && /^## / && $0 != month { in_month=0 }
+                    BEGIN { in_month=0; inserted=0 }
                     {
-                        if (in_month && /^## / && $0 != month) {
-                            # Entering next month — insert our day before this line
+                        # End-of-month signals: separator line or next ## heading
+                        if (!inserted && in_month && (/^----/ || (/^## / && $0 != month))) {
                             printf "\n%s\n\n", day
-                            in_month=0
+                            inserted=1
                         }
+                        # Update in_month tracking (AFTER the insert check above)
+                        if ($0 == month)        { in_month=1 }
+                        else if (/^## /)        { in_month=0 }
                         print
                     }
                     END {
-                        if (in_month) {
-                            # Month was last section — append at end
+                        if (in_month && !inserted) {
                             printf "\n%s\n\n", day
                         }
                     }
